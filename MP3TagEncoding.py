@@ -11,6 +11,37 @@ from mutagen.easyid3 import EasyID3 as ID3
 
 encodings = ['gb2312', 'utf-8']
 
+def analyse_files(scan_files):
+    """
+    Analyse the mp3 files provided in path.
+    scan_files can be a folder. This will generate a config file for all mp3 files within this folder recursively.
+    scan_files can be the path of one single mp3 file. Then the config file will contain only this file.
+    When scan_files is empty, scan current folder recursively.
+    """
+    if len(scan_files) == 0:
+            scan_files.append('.')
+
+    json_file = []
+
+    while (len(scan_files) > 0):
+        file = scan_files.pop(0)
+        if os.path.isfile(file):
+            result = read_tags(file)
+            if result is not None:
+                print json.dumps(result, indent = 4).decode('unicode-escape').encode('utf-8')
+                json_file.append(result)
+        else:
+            for (dirpath, dirnames, filenames) in os.walk(file):
+                scan_files[0:0] = [os.path.join(dirpath, f) for f in filenames if f.lower().endswith('.mp3')]
+                scan_files[0:0] = [os.path.join(dirpath, d) for d in dirnames]
+                break
+
+    filename = 'id3conf-' + datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S") + '.json'
+    with codecs.open(filename, 'w') as output:
+        str_ = json.dumps(json_file, indent = 4).decode('unicode-escape').encode('utf-8')
+        output.write(str_)
+    
+    
 def read_tags(file):
     """
     Read all the tags in one mp3 file and return in a JSON object
@@ -34,7 +65,12 @@ def read_tags(file):
                 encoded_value.extend(all_possible_decode(encoded))    
                     
             preferred = preferred_value(encoded_value)
-            if preferred is not encoded_value[0]:
+
+#            print 'preferred', preferred, type(preferred), [preferred]
+#            print 'all', encoded_value
+            if preferred != encoded_value[-1]:
+#                print 'preferred', preferred, type(preferred), [preferred]
+#                print 'last', encoded_value[-1], type(encoded_value[-1]), [encoded_value[-1]]
                 tag_value_dict = {'value' : encoded_value,
                                   'preferred' : preferred}
                 tag_value_array.append(tag_value_dict)
@@ -52,18 +88,14 @@ def all_possible_decode(tag):
     for encoding in encodings:
         try:
             values.append(tag.decode(encoding).encode('utf-8'))
-        except Exception:
+        except Exception as e:
             pass
     return values
 
 def preferred_value(all_possible_values):
     """ Returns the most suitable value for all values decoded by provided encodings"""
     """ Now returns the shortest value """
-#    print all_possible_values
-#    print [len(f) for f in all_possible_values]
-#    print [type(f) for f in all_possible_values]
     sorted_values = sorted(all_possible_values, key=len)
-#    print sorted_values
     return (sorted_values or [None])[0]
     
 def update_using_config(config):
@@ -71,6 +103,16 @@ def update_using_config(config):
     Update mp3 files in config file with provided strings
     config: a JSON file
     """
+    try:
+        json_data = json.load(open(config, 'r'))
+    except Exception as e:
+        print "Error opening file: " + e
+        raise
+
+    for mp3_json in json_data:
+        file = mp3_json['path']
+        tags = mp3_json['tags']
+        update_mp3_with_tags(file, tags)
     
 def update_mp3_with_tags(file, tags):
     """
@@ -78,6 +120,20 @@ def update_mp3_with_tags(file, tags):
     file: Path to a mp3 file
     tags: Provided tags
     """
+    try:
+        id3 = ID3(file)
+        print "updating file", file.rsplit('/', 1)[-1]
+        for key in tags.iterkeys():
+            values = tags[key]
+            new_tag_value = [single_tag_dict['preferred'] for single_tag_dict in values]
+            print "    updating key", key, 'from', id3[key], 'to', new_tag_value
+            id3[key] = new_tag_value
+            
+        id3.save()
+            
+    except Exception as e:
+        print 'Error', e
+        pass        
 
 def main():
     try:
@@ -104,34 +160,13 @@ def main():
             sys.exit(0)
         
         # If no directory is specified, use current folder
-        if len(scan_files) == 0:
-            scan_files.append('.')
-
-        json_file = []
-        # Scan MP3 files in provided files list and create report
-        while (len(scan_files) > 0):
-            file = scan_files.pop(0)
-            if os.path.isfile(file):
-                result = read_tags(file)
-                if result is not None:
-                    json_file.append(result)
-            else:
-                for (dirpath, dirnames, filenames) in os.walk(file):
-                    scan_files[0:0] = [os.path.join(dirpath, f) for f in filenames if f.lower().endswith('.mp3')]
-                    scan_files[0:0] = [os.path.join(dirpath, d) for d in dirnames]
-                    break
-        
-#        print json_file
-        filename = 'id3conf-' + datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S") + '.json'
-        with codecs.open(filename, 'w') as output:
-            str_ = json.dumps(json_file, indent = 4).decode('unicode-escape').encode('utf-8')
-            print str_
-            output.write(str_)
-                            
+        analyse_files(scan_files)
         
     except KeyboardInterrupt:
         print "Aborting process"
         pass
+    except Exception:
+        exit(0)
 
 if __name__ == "__main__":
     main()
