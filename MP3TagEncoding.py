@@ -9,7 +9,11 @@ import datetime
 
 from mutagen.easyid3 import EasyID3 as ID3
 
-encodings = ['gb2312', 'utf-8']
+# All candidate encodings
+encodings = ['gb2312', 'GBK', 'utf-8']
+
+# By default interactive mode is off
+interactive_mode = False
 
 def analyse_files(scan_files):
     """
@@ -28,18 +32,22 @@ def analyse_files(scan_files):
         if os.path.isfile(file):
             result = read_tags(file)
             if result is not None:
-                print json.dumps(result, indent = 4).decode('unicode-escape').encode('utf-8')
-                json_file.append(result)
+                if interactive_mode: # Update the mp3 file using interactive mode
+                    update_mp3_with_config(result)
+                else: # Print out result and add to collection
+                    print helper_nice_format_json(result)
+                    json_file.append(result)
         else:
             for (dirpath, dirnames, filenames) in os.walk(file):
                 scan_files[0:0] = [os.path.join(dirpath, f) for f in filenames if f.lower().endswith('.mp3')]
                 scan_files[0:0] = [os.path.join(dirpath, d) for d in dirnames]
                 break
 
-    filename = 'id3conf-' + datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S") + '.json'
-    with codecs.open(filename, 'w') as output:
-        str_ = json.dumps(json_file, indent = 4).decode('unicode-escape').encode('utf-8')
-        output.write(str_)
+    if not interactive_mode:
+        filename = 'id3conf-' + datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S") + '.json'
+        with codecs.open(filename, 'w') as output:
+            str_ = helper_nice_format_json(json_file)
+            output.write(str_)
     
     
 def read_tags(file):
@@ -66,11 +74,7 @@ def read_tags(file):
                     
             preferred = preferred_value(encoded_value)
 
-#            print 'preferred', preferred, type(preferred), [preferred]
-#            print 'all', encoded_value
             if preferred != encoded_value[-1]:
-#                print 'preferred', preferred, type(preferred), [preferred]
-#                print 'last', encoded_value[-1], type(encoded_value[-1]), [encoded_value[-1]]
                 tag_value_dict = {'value' : encoded_value,
                                   'preferred' : preferred}
                 tag_value_array.append(tag_value_dict)
@@ -84,6 +88,9 @@ def read_tags(file):
         return None
 
 def all_possible_decode(tag):
+    """
+    Returns all possible strings using candidate encodings
+    """
     values = []
     for encoding in encodings:
         try:
@@ -93,8 +100,10 @@ def all_possible_decode(tag):
     return values
 
 def preferred_value(all_possible_values):
-    """ Returns the most suitable value for all values decoded by provided encodings"""
-    """ Now returns the shortest value """
+    """ 
+    Returns the most suitable value for all values decoded by provided encodings
+    Now returns the shortest value 
+    """
     sorted_values = sorted(all_possible_values, key=len)
     return (sorted_values or [None])[0]
     
@@ -105,13 +114,26 @@ def update_using_config(config):
     """
     try:
         json_data = json.load(open(config, 'r'))
-    except Exception as e:
-        print "Error opening file: " + e
+    except Exception as ex:
+        print "Error opening file:", ex
         raise
 
     for mp3_json in json_data:
-        file = mp3_json['path']
-        tags = mp3_json['tags']
+        update_mp3_with_config(mp3_json)
+
+def update_mp3_with_config(config):
+    """
+    Update mp3 file using config
+    Depending on interactive mode flag, either update directly or ask user whether to process.
+    """
+    file = config['path']
+    tags = config['tags']
+    if interactive_mode:
+        print helper_nice_format_json(tags)
+        r = raw_input('Proceed with this? (y/n) ')
+        if r.startswith('y') or r.startswith('Y'):
+            update_mp3_with_tags(file, tags)
+    else:
         update_mp3_with_tags(file, tags)
     
 def update_mp3_with_tags(file, tags):
@@ -125,7 +147,9 @@ def update_mp3_with_tags(file, tags):
         print "updating file", file.rsplit('/', 1)[-1]
         for key in tags.iterkeys():
             values = tags[key]
-            new_tag_value = [single_tag_dict['preferred'] for single_tag_dict in values]
+            new_values = [single_tag_dict['preferred'] for single_tag_dict in values]
+            f = lambda value: value if type(value) is unicode else value.decode('utf-8')
+            new_tag_value = map(f, new_values)
             print "    updating key", key, 'from', id3[key], 'to', new_tag_value
             id3[key] = new_tag_value
             
@@ -133,7 +157,10 @@ def update_mp3_with_tags(file, tags):
             
     except Exception as e:
         print 'Error', e
-        pass        
+        pass
+    
+def helper_nice_format_json(json_value):
+    return json.dumps(json_value, indent = 4).decode('unicode-escape').encode('utf-8')
 
 def main():
     try:
@@ -143,9 +170,12 @@ def main():
         
         for arg in sys.argv[1:]:
             if arg.startswith('-'):
-                option = arg[1].lower()
+                option = arg[1:].lower()
                 if option == 'c':
                     found_config = True
+                elif option == 'i':
+                    global interactive_mode
+                    interactive_mode = True
             else:
                 if found_config:
                     config_file = arg
@@ -165,7 +195,8 @@ def main():
     except KeyboardInterrupt:
         print "Aborting process"
         pass
-    except Exception:
+    except Exception as ex:
+        print ex
         exit(0)
 
 if __name__ == "__main__":
