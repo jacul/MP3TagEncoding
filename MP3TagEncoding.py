@@ -46,7 +46,7 @@ def analyse_files(scan_files):
     if not interactive_mode:
         filename = 'id3conf-' + datetime.datetime.now().strftime("%Y-%m-%d %H-%M-%S") + '.json'
         with codecs.open(filename, 'w') as output:
-            str_ = helper_nice_format_json(json_file)
+            str_ = helper_nice_format_json(helper_safe_escape_string_in_json(json_file))
             output.write(str_)
     
     
@@ -72,7 +72,7 @@ def read_tags(file):
                 encoded = value.encode('utf-8')
                 encoded_value.extend(all_possible_decode(encoded))    
                     
-            preferred = preferred_value(encoded_value)
+            preferred = preferred_value(encoded_value, file.rsplit('/', 1)[-1])
 
             if preferred != encoded_value[-1]:
                 tag_value_dict = {'value' : encoded_value,
@@ -99,11 +99,18 @@ def all_possible_decode(tag):
             pass
     return values
 
-def preferred_value(all_possible_values):
+def preferred_value(all_possible_values, filename):
     """ 
     Returns the most suitable value for all values decoded by provided encodings
-    Now returns the shortest value 
+    First Priority: this value is part of the file name
+    Second Priority: this value is the shortest length
     """
+    # File name contains this value
+    for value in all_possible_values:
+        if value in filename:
+            return value
+
+    # Find shortest length of value
     sorted_values = sorted(all_possible_values, key=len)
     return (sorted_values or [None])[0]
     
@@ -161,6 +168,16 @@ def update_mp3_with_tags(file, tags):
     
 def helper_nice_format_json(json_value):
     return json.dumps(json_value, indent = 4).decode('unicode-escape').encode('utf-8')
+
+def helper_safe_escape_string_in_json(json_value):
+    if type(json_value) is str:
+        return json_value.replace('\\', '\\\\').replace('\"', '\\\"').replace('\n', '\\n')
+    elif type(json_value) is list:
+        return [helper_safe_escape_string_in_json(f) for f in json_value]
+    elif type(json_value) is dict:
+        return {k: helper_safe_escape_string_in_json(v) for k, v in json_value.iteritems()}
+    else:
+        return json_value
 
 def main():
     try:
