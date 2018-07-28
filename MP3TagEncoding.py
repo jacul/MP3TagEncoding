@@ -136,7 +136,10 @@ def update_mp3_with_config(config):
     file = config['path']
     tags = config['tags']
     if interactive_mode:
-        print helper_nice_format_json(tags)
+        print "Update:", file
+        for key in tags.iterkeys():
+            for value in tags[key]:
+                print " ", key, "\t\t->", value["preferred"]
         r = raw_input('Proceed with this? (y/n) ')
         if r.startswith('y') or r.startswith('Y'):
             update_mp3_with_tags(file, tags)
